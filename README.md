@@ -1,0 +1,1 @@
+# moj-dziennik-sklepu
