@@ -43,11 +43,10 @@ def pobierz_dane():
         
         if 'Data' in df.columns:
             df['Data'] = pd.to_datetime(df['Data']).dt.date
-            # POPRAWKA SORTOWANIA: Najpierw Data (Malejąco), potem Godzina (Malejąco)
-            # Dzięki temu godzina 20:00 będzie wyżej niż 8:00 tego samego dnia
+            # Sortowanie: Data malejąco, potem Godzina malejąco
             df = df.sort_values(by=['Data', 'Godzina'], ascending=[False, False])
             
-        # Reset indeksu (Lp.)
+        # Reset indeksu
         df = df.reset_index(drop=True)
         return df
     except Exception as e:
@@ -56,6 +55,12 @@ def pobierz_dane():
 def zapisz_wszystko(df):
     """Naprawa matematyki i zapis"""
     df_save = df.copy()
+
+    # --- BEZPIECZNIK ---
+    # Jeśli w tabeli jest kolumna 'Lp.', usuwamy ją przed zapisem do Google
+    # (Nie chcemy jej w bazie, bo ona jest tylko do podglądu)
+    if 'Lp.' in df_save.columns:
+        df_save = df_save.drop(columns=['Lp.'])
     
     # Przeliczanie średniej
     df_save['Srednia'] = df_save.apply(
@@ -81,12 +86,11 @@ def zapisz_wszystko(df):
 
 tab1, tab2 = st.tabs(["🏠 Panel Główny", "📅 Historia i Wykresy"])
 
-# === ZAKŁADKA 1: PANEL GŁÓWNY (DZIELONY) ===
+# === ZAKŁADKA 1: PANEL GŁÓWNY ===
 with tab1:
-    
     col_left, col_right = st.columns([0.35, 0.65], gap="large")
 
-    # --- LEWA KOLUMNA: FORMULARZ ---
+    # --- LEWA: FORMULARZ ---
     with col_left:
         st.markdown("##### ➕ Nowy wpis")
         with st.container(border=True):
@@ -94,7 +98,6 @@ with tab1:
                 wybrana_data = st.date_input("Data", date.today())
                 
                 godziny_lista = [f"{h}:00" for h in range(7, 22)]
-                # Domyślna godzina ustawiona na aktualną (lub bliską)
                 wybor_godziny = st.selectbox("Godzina", godziny_lista)
                 
                 klienci = st.number_input("Liczba klientów", min_value=0, step=1)
@@ -113,16 +116,23 @@ with tab1:
             except Exception as e:
                 st.error(f"Błąd zapisu: {e}")
 
-    # --- PRAWA KOLUMNA: LISTA I EDYCJA ---
+    # --- PRAWA: TABELA Z Lp. ---
     with col_right:
         df = pobierz_dane()
         
         if not df.empty:
+            # --- DODANIE KOLUMNY Lp. ---
+            # Dodajemy kolumnę Lp. na samym początku (index 0)
+            # range(1, len+1) tworzy liczby od 1 do końca listy
+            df.insert(0, 'Lp.', range(1, len(df) + 1))
+            # ---------------------------
+
             # Usuwanie
             with st.expander("🗑️ Narzędzie usuwania"):
                 mapa_wpisow = {}
                 for idx, row in df.iterrows():
-                    etykieta = f"Lp. {idx + 1} | {row['Data']} | {row['Godzina']} | {row['Utarg']:.2f} zł"
+                    # Tutaj używamy Lp. z wiersza
+                    etykieta = f"Lp. {row['Lp.']} | {row['Data']} | {row['Godzina']} | {row['Utarg']:.2f} zł"
                     mapa_wpisow[etykieta] = idx
                 
                 wybrana_etykieta = st.selectbox("Wybierz wpis do usunięcia:", list(mapa_wpisow.keys()))
@@ -136,9 +146,10 @@ with tab1:
                     st.rerun()
 
             # Tabela
-            st.markdown("##### 🖊️ Ostatnie wpisy (Od najnowszego)")
+            st.markdown("##### 🖊️ Ostatnie wpisy (Zgodność numeracji Lp.)")
             
             konfiguracja = {
+                "Lp.": st.column_config.NumberColumn("Lp.", disabled=True, width="small"), # Zablokowana edycja Lp.
                 "Godzina": st.column_config.SelectboxColumn("Godzina", options=[f"{h}:00" for h in range(7, 22)], required=True),
                 "Utarg": st.column_config.NumberColumn("Utarg", min_value=0, format="%.2f zł"),
                 "Srednia": st.column_config.NumberColumn("Średnia", format="%.2f zł", disabled=True),
@@ -152,7 +163,8 @@ with tab1:
                 num_rows="dynamic", 
                 use_container_width=True, 
                 key="editor",
-                height=500
+                height=500,
+                hide_index=True # Ukrywamy domyślny indeks (ten z lewej), bo mamy własne Lp.
             )
             
             if st.button("💾 ZATWIERDŹ ZMIANY W TABELI", use_container_width=True):
@@ -180,17 +192,14 @@ with tab2:
 
         st.divider()
         
-        # Przygotowanie danych do wykresu (Sumowanie dzienne)
+        # Wykres i Tabela dzienna
         kalendarz = df.groupby('Data')[['Utarg', 'Klienci']].sum().sort_index(ascending=False).reset_index()
         kalendarz['Srednia Dnia'] = kalendarz.apply(lambda x: x['Utarg'] / x['Klienci'] if x['Klienci'] > 0 else 0, axis=1)
         
-        # --- POPRAWKA WYKRESU (NAPRAWA ROZJEŻDŻANIA) ---
-        # Zamieniamy datę na tekst (String), żeby wykres traktował dni jako 'Kategorie', a nie 'Oś czasu'
+        # Formatowanie wykresu
         kalendarz_wykres = kalendarz.copy()
         kalendarz_wykres['Data'] = kalendarz_wykres['Data'].astype(str)
-        # Sortujemy rosnąco dla wykresu (od lewej do prawej chronologicznie)
         kalendarz_wykres = kalendarz_wykres.sort_values(by='Data')
-        # -----------------------------------------------
 
         st.markdown("**Wykres dzienny:**")
         st.bar_chart(kalendarz_wykres, x="Data", y="Utarg")
