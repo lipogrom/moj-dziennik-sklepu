@@ -8,20 +8,20 @@ from datetime import date
 st.set_page_config(page_title="Dziennik Sklepu Cloud", page_icon="☁️", layout="wide")
 st.title("☁️ Dziennik Sklepu (Google Sheets)")
 
-# --- 2. POŁĄCZENIE Z GOOGLE ---
-# Upewnij się, że Twój plik na dysku ma taką nazwę!
-NAZWA_ARKUSZA = "Dziennik Sklepu Baza"
+# --- 2. POŁĄCZENIE Z GOOGLE (METODA PANCERNA - PO ID) ---
+# WKLEJ TUTAJ SWOJE ID ARKUSZA (To z linku w przeglądarce)
+ARKUSZ_ID = "13M376ahDkq_8ZdwxDZ5Njn4cTKfO4v78ycMRsowmPMs" 
 
 @st.cache_resource
 def polacz_z_google():
-    """Łączy się z Google Sheets używając klucza z Secrets"""
+    """Łączy się z Google Sheets używając ID arkusza"""
     try:
         scope = ['https://www.googleapis.com/auth/spreadsheets']
-        # Pobieramy klucz z sejfu Streamlit
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
         client = gspread.authorize(creds)
-        # Otwieramy arkusz
-        sheet = client.open(NAZWA_ARKUSZA).sheet1
+        
+        # Otwieramy po ID (open_by_key) - to działa zawsze, niezależnie od folderu
+        sheet = client.open_by_key(ARKUSZ_ID).sheet1
         return sheet
     except Exception as e:
         return None
@@ -30,8 +30,14 @@ def polacz_z_google():
 arkusz = polacz_z_google()
 
 if arkusz is None:
-    st.error(f"❌ BŁĄD: Nie mogę znaleźć arkusza o nazwie '{NAZWA_ARKUSZA}' lub robot nie ma do niego dostępu.")
-    st.info("Sprawdź czy udostępniłeś arkusz dla maila robota (client_email)!")
+    st.error(f"❌ BŁĄD: Nie mogę otworzyć arkusza o ID: {ARKUSZ_ID}")
+    st.info("Porady naprawcze:")
+    st.markdown("""
+    1. Sprawdź, czy wkleiłeś **dobre ID** w kodzie (tylko ciąg znaków z linku).
+    2. Upewnij się na 100%, że kliknąłeś w arkuszu **Udostępnij** i wkleiłeś mail robota:
+       `client_email` (znajdziesz go w pliku secrets).
+    3. Robot musi mieć uprawnienia **Edytujący**.
+    """)
     st.stop()
 else:
     st.toast("Połączono z Google Sheets!", icon="✅")
@@ -45,7 +51,7 @@ def pobierz_dane():
             return pd.DataFrame(columns=['Data', 'Godzina', 'Klienci', 'Utarg', 'Srednia'])
         
         df = pd.DataFrame(dane)
-        # Konwersja liczb (gdyby Google zapisał je jako tekst)
+        # Konwersja liczb
         df['Klienci'] = pd.to_numeric(df['Klienci'], errors='coerce').fillna(0).astype(int)
         df['Utarg'] = pd.to_numeric(df['Utarg'], errors='coerce').fillna(0.0)
         df['Srednia'] = pd.to_numeric(df['Srednia'], errors='coerce').fillna(0.0)
@@ -56,17 +62,17 @@ def pobierz_dane():
             df = df.sort_values(by=['Data', 'Godzina'], ascending=[False, True])
         return df
     except Exception as e:
-        st.error(f"Błąd pobierania: {e}")
-        return pd.DataFrame()
+        # Jeśli arkusz jest pusty lub ma zły format nagłówków
+        return pd.DataFrame(columns=['Data', 'Godzina', 'Klienci', 'Utarg', 'Srednia'])
 
 def zapisz_wszystko(df):
-    """Nadpisuje cały arkusz (dla edycji)"""
+    """Nadpisuje cały arkusz"""
     df_save = df.copy()
-    df_save['Data'] = df_save['Data'].astype(str) # Data na tekst dla JSONa
+    df_save['Data'] = df_save['Data'].astype(str)
     
     arkusz.clear()
-    arkusz.append_row(df_save.columns.tolist()) # Nagłówki
-    arkusz.append_rows(df_save.values.tolist()) # Dane
+    arkusz.append_row(df_save.columns.tolist())
+    arkusz.append_rows(df_save.values.tolist())
 
 # --- 4. INTERFEJS ---
 tab1, tab2 = st.tabs(["✍️ Wpis i Edycja", "📅 Kalendarz i Historia"])
@@ -75,7 +81,6 @@ tab1, tab2 = st.tabs(["✍️ Wpis i Edycja", "📅 Kalendarz i Historia"])
 with tab1:
     st.header("Zarządzanie wpisami")
     
-    # FORMULARZ (SIDEBAR)
     with st.sidebar:
         st.header("➕ Dodaj nowy wpis")
         with st.form("dodaj_wpis"):
@@ -93,22 +98,22 @@ with tab1:
         
         try:
             arkusz.append_row(nowy_wiersz)
-            st.success(f"✅ Zapisano w Google Sheets! {wybrana_data} - {wybor_godziny}")
+            st.success(f"✅ Zapisano! {wybrana_data} - {wybor_godziny}")
             st.rerun()
         except Exception as e:
             st.error(f"Błąd zapisu: {e}")
 
-    # EDYCJA TABELI
+    # EDYCJA
     df = pobierz_dane()
     
     if not df.empty:
-        st.info("💡 Kliknij w tabelę, aby edytować. Potem kliknij przycisk poniżej.")
+        st.info("💡 Edytuj tabelę i zatwierdź przyciskiem poniżej.")
         edytowane = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="editor")
         
         if st.button("💾 ZATWIERDŹ ZMIANY W GOOGLE SHEETS", type="primary"):
-            with st.spinner("Aktualizuję chmurę Google..."):
+            with st.spinner("Aktualizuję chmurę..."):
                 zapisz_wszystko(edytowane)
-            st.success("Gotowe! Arkusz zaktualizowany.")
+            st.success("Arkusz zaktualizowany.")
             st.rerun()
 
 # === ZAKŁADKA 2: KALENDARZ ===
@@ -117,18 +122,11 @@ with tab2:
     df = pobierz_dane()
     
     if not df.empty:
-        # Sumowanie dzienne
         kalendarz = df.groupby('Data')[['Utarg', 'Klienci']].sum().sort_index(ascending=False).reset_index()
         
         col1, col2 = st.columns(2)
         col1.metric("Łączny Utarg", f"{df['Utarg'].sum():.2f} zł")
         col2.metric("Łącznie Klientów", f"{df['Klienci'].sum()}")
         
-        st.subheader("Historia dni")
-        st.dataframe(
-            kalendarz, 
-            column_config={"Utarg": st.column_config.NumberColumn(format="%.2f zł")},
-            use_container_width=True
-        )
-        
+        st.dataframe(kalendarz, use_container_width=True)
         st.bar_chart(kalendarz, x="Data", y="Utarg")
