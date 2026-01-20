@@ -9,7 +9,7 @@ st.set_page_config(page_title="Dziennik Sklepu Cloud", page_icon="☁️", layou
 st.title("☁️ Dziennik Sklepu (Google Sheets)")
 
 # --- 2. POŁĄCZENIE Z GOOGLE ---
-# 👇👇👇 ID ARKUSZA (Poprawione - bez spacji na końcu) 👇👇👇
+# 👇👇👇 TUTAJ WKLEJ SWOJE ID ARKUSZA 👇👇👇
 ARKUSZ_ID = "13M376ahDkq_8ZdwxDZ5Njn4cTKfO4v78ycMRsowmPMs"
 
 @st.cache_resource
@@ -19,31 +19,21 @@ def polacz_z_google():
         scope = ['https://www.googleapis.com/auth/spreadsheets']
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
         client = gspread.authorize(creds)
-        # Otwieramy po ID
         sheet = client.open_by_key(ARKUSZ_ID).sheet1
         return sheet
     except Exception as e:
-        # Wypisujemy błąd w logach (dla Ciebie), żebyś widział co jest nie tak
-        print(f"Błąd połączenia: {e}")
         return None
 
 arkusz = polacz_z_google()
 
 if arkusz is None:
-    st.error(f"❌ BŁĄD: Nie mogę otworzyć arkusza o ID: {ARKUSZ_ID}")
-    st.info("💡 Rozwiązanie:")
-    st.markdown("""
-    1. Sprawdź, czy na pewno kliknąłeś **Udostępnij** w tym nowym arkuszu.
-    2. Sprawdź, czy wkleiłeś tam e-mail robota:
-       (Znajdziesz go w Streamlit -> Settings -> Secrets -> client_email).
-    """)
+    st.error(f"❌ BŁĄD: Nie mogę otworzyć arkusza. Sprawdź ID w kodzie.")
     st.stop()
 else:
     st.toast("Połączono z Google Sheets!", icon="✅")
 
 # --- 3. FUNKCJE DANYCH ---
 def pobierz_dane():
-    """Pobiera wszystkie dane z arkusza do DataFrame"""
     try:
         dane = arkusz.get_all_records()
         if not dane:
@@ -51,12 +41,11 @@ def pobierz_dane():
         
         df = pd.DataFrame(dane)
         
-        # Konwersja liczb (zabezpieczenie przed błędami)
+        # Konwersja typów
         df['Klienci'] = pd.to_numeric(df['Klienci'], errors='coerce').fillna(0).astype(int)
         df['Utarg'] = pd.to_numeric(df['Utarg'], errors='coerce').fillna(0.0)
         df['Srednia'] = pd.to_numeric(df['Srednia'], errors='coerce').fillna(0.0)
         
-        # Sortowanie dat
         if 'Data' in df.columns:
             df['Data'] = pd.to_datetime(df['Data']).dt.date
             df = df.sort_values(by=['Data', 'Godzina'], ascending=[False, True])
@@ -65,15 +54,21 @@ def pobierz_dane():
         return pd.DataFrame(columns=['Data', 'Godzina', 'Klienci', 'Utarg', 'Srednia'])
 
 def zapisz_wszystko(df):
-    """Nadpisuje cały arkusz (Bezpieczna wersja)"""
+    """Nadpisuje cały arkusz"""
     df_save = df.copy()
     
-    # --- NAPRAWA PUSTYCH PÓL (Sanityzacja) ---
+    # Przeliczamy średnią na nowo (na wypadek gdybyś zmienił utarg w tabeli)
+    # Zabezpieczenie przed dzieleniem przez zero
+    df_save['Srednia'] = df_save.apply(
+        lambda row: round(row['Utarg'] / row['Klienci'], 2) if row['Klienci'] > 0 else 0.0, 
+        axis=1
+    )
+
+    # Sanityzacja (puste pola na zera)
     df_save['Klienci'] = pd.to_numeric(df_save['Klienci'], errors='coerce').fillna(0).astype(int)
     df_save['Utarg'] = pd.to_numeric(df_save['Utarg'], errors='coerce').fillna(0.0)
     df_save['Srednia'] = pd.to_numeric(df_save['Srednia'], errors='coerce').fillna(0.0)
-    df_save = df_save.fillna("") # Reszta pustych na pusty tekst
-    # -----------------------------------------
+    df_save = df_save.fillna("")
 
     df_save['Data'] = df_save['Data'].astype(str)
     
@@ -91,13 +86,13 @@ tab1, tab2 = st.tabs(["✍️ Wpis i Edycja", "📅 Kalendarz i Historia"])
 with tab1:
     st.header("Zarządzanie wpisami")
     
-    # --- A. FORMULARZ DODAWANIA (LEWY PASEK) ---
+    # --- FORMULARZ BOCZNY ---
     with st.sidebar:
         st.header("➕ Dodaj nowy wpis")
         with st.form("dodaj_wpis"):
             wybrana_data = st.date_input("Data", date.today())
-            godziny = [f"{h}:00" for h in range(7, 22)]
-            wybor_godziny = st.selectbox("Godzina", godziny)
+            godziny_lista = [f"{h}:00" for h in range(7, 22)]
+            wybor_godziny = st.selectbox("Godzina", godziny_lista)
             klienci = st.number_input("Liczba klientów", min_value=0, step=1)
             utarg = st.number_input("Utarg (zł)", min_value=0.0, step=0.1)
             
@@ -113,40 +108,58 @@ with tab1:
         except Exception as e:
             st.error(f"Błąd zapisu: {e}")
 
-    # --- B. EDYCJA I USUWANIE (ŚRODEK) ---
+    # --- TABELA EDYCJI (Nowa Konfiguracja!) ---
     df = pobierz_dane()
     
     if not df.empty:
-        # SEKCJA USUWANIA
-        with st.expander("🗑️ NARZĘDZIE USUWANIA (Kliknij, aby rozwinąć)", expanded=False):
-            st.warning("Wybierz wpis z listy, aby go trwale usunąć.")
-            
-            # Lista do wyboru
-            lista_wpisow = [
-                f"{row['Data']} | Godz: {row['Godzina']} | Utarg: {row['Utarg']} zł | Klientów: {row['Klienci']}" 
-                for index, row in df.iterrows()
-            ]
-            
-            wybrany_do_usuniecia = st.selectbox("Wybierz wpis do skasowania:", lista_wpisow)
-            
-            if st.button("❌ USUŃ WYBRANY WPIS", type="primary"):
-                indeks = lista_wpisow.index(wybrany_do_usuniecia)
-                df_po_usunieciu = df.drop(df.index[indeks])
-                
-                with st.spinner("Usuwam wpis z chmury..."):
-                    zapisz_wszystko(df_po_usunieciu)
-                
-                st.success("Wpis usunięty!")
-                st.rerun()
+        # Konfiguracja kolumn - Tu dzieje się magia wyglądu
+        konfiguracja_kolumn = {
+            "Godzina": st.column_config.SelectboxColumn(
+                "Godzina",
+                help="Kliknij dwukrotnie, aby zmienić godzinę",
+                width="medium",
+                options=[f"{h}:00" for h in range(7, 22)], # Lista 7-21
+                required=True
+            ),
+            "Utarg": st.column_config.NumberColumn(
+                "Utarg",
+                help="Utarg w złotówkach",
+                min_value=0,
+                step=0.1,
+                format="%.2f zł" # Formatowanie waluty
+            ),
+            "Srednia": st.column_config.NumberColumn(
+                "Średnia",
+                format="%.2f zł", # Formatowanie waluty
+                disabled=True # Średniej nie edytujemy, ona się sama liczy
+            ),
+            "Klienci": st.column_config.NumberColumn(
+                "Klienci",
+                min_value=0,
+                step=1,
+                format="%d"
+            ),
+            "Data": st.column_config.DateColumn(
+                "Data",
+                format="YYYY-MM-DD"
+            )
+        }
 
-        st.divider()
-
-        # SEKCJA TABELI EDYCJI
         st.subheader("🖊️ Tabela (Edycja)")
-        edytowane = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="editor")
+        st.info("Kliknij dwukrotnie w komórkę, aby edytować.")
         
-        if st.button("💾 ZATWIERDŹ ZMIANY W TABELI"):
-            with st.spinner("Aktualizuję chmurę..."):
+        # Wyświetlamy tabelę z nową konfiguracją
+        edytowane = st.data_editor(
+            df, 
+            column_config=konfiguracja_kolumn, # Podpinamy konfigurację
+            num_rows="dynamic", 
+            use_container_width=True, 
+            key="editor"
+        )
+        
+        # Przycisk zapisu
+        if st.button("💾 ZATWIERDŹ ZMIANY W TABELI", type="primary"):
+            with st.spinner("Przeliczam średnią i aktualizuję chmurę..."):
                 zapisz_wszystko(edytowane)
             st.success("Arkusz zaktualizowany.")
             st.rerun()
@@ -163,5 +176,9 @@ with tab2:
         col1.metric("Łączny Utarg", f"{df['Utarg'].sum():.2f} zł")
         col2.metric("Łącznie Klientów", f"{df['Klienci'].sum()}")
         
-        st.dataframe(kalendarz, use_container_width=True)
+        st.dataframe(
+            kalendarz, 
+            column_config={"Utarg": st.column_config.NumberColumn(format="%.2f zł")},
+            use_container_width=True
+        )
         st.bar_chart(kalendarz, x="Data", y="Utarg")
