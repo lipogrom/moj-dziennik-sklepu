@@ -36,17 +36,17 @@ def pobierz_dane():
             return pd.DataFrame(columns=['Data', 'Godzina', 'Klienci', 'Utarg', 'Srednia'])
         df = pd.DataFrame(dane)
         
-        # Konwersja i czyszczenie
+        # Konwersja
         df['Klienci'] = pd.to_numeric(df['Klienci'], errors='coerce').fillna(0).astype(int)
         df['Utarg'] = pd.to_numeric(df['Utarg'], errors='coerce').fillna(0.0)
         df['Srednia'] = pd.to_numeric(df['Srednia'], errors='coerce').fillna(0.0)
         
         if 'Data' in df.columns:
             df['Data'] = pd.to_datetime(df['Data']).dt.date
-            # Sortowanie: Najnowsze na górze
+            # Sortowanie: Data malejąco, potem Godzina rosnąco
             df = df.sort_values(by=['Data', 'Godzina'], ascending=[False, True])
             
-        # WAŻNE: Resetujemy indeks, żeby Lp. szło po kolei (0, 1, 2...)
+        # Reset indeksu dla porządku (Lp.)
         df = df.reset_index(drop=True)
         return df
     except Exception as e:
@@ -56,7 +56,7 @@ def zapisz_wszystko(df):
     """Naprawa matematyki i zapis"""
     df_save = df.copy()
     
-    # Przeliczanie średniej
+    # Przeliczanie średniej (Dzielenie: Utarg / Klienci)
     df_save['Srednia'] = df_save.apply(
         lambda row: round(float(row['Utarg']) / float(row['Klienci']), 2) if row['Klienci'] > 0 else 0.0, 
         axis=1
@@ -78,106 +78,114 @@ def zapisz_wszystko(df):
 
 # --- 4. INTERFEJS ---
 
-tab1, tab2 = st.tabs(["🏠 Wpis i Edycja", "📅 Historia i Kalendarz"])
+# Zakładki główne na samej górze
+tab1, tab2 = st.tabs(["🏠 Panel Główny (Dodaj i Edytuj)", "📅 Historia i Wykresy"])
 
-# === ZAKŁADKA 1: GŁÓWNA ===
+# === ZAKŁADKA 1: PANEL GŁÓWNY (DZIELONY) ===
 with tab1:
-    st.markdown("##### ➕ Dodaj nowy wpis")
     
-    with st.form("dodaj_wpis_main"):
-        col1, col2 = st.columns(2)
-        with col1:
-            wybrana_data = st.date_input("Data", date.today())
-            klienci = st.number_input("Liczba klientów", min_value=0, step=1)
-        with col2:
-            godziny_lista = [f"{h}:00" for h in range(7, 22)]
-            wybor_godziny = st.selectbox("Godzina", godziny_lista)
-            utarg = st.number_input("Utarg (zł)", min_value=0.0, step=0.1)
-        
-        submit = st.form_submit_button("ZAPISZ WPIS", type="primary", use_container_width=True)
+    # Dzielimy ekran na dwie kolumny: LEWA (Formularz) i PRAWA (Tabela)
+    # Proporcja [0.35, 0.65] oznacza, że lewa zajmuje 35% ekranu, prawa 65%
+    col_left, col_right = st.columns([0.35, 0.65], gap="large")
 
-    if submit:
-        srednia = round(utarg / klienci, 2) if klienci > 0 else 0
-        nowy_wiersz = [str(wybrana_data), wybor_godziny, klienci, utarg, srednia]
-        try:
-            arkusz.append_row(nowy_wiersz)
-            st.success(f"✅ Dodano! {wybor_godziny} | {utarg} zł")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Błąd zapisu: {e}")
-
-    st.divider()
-
-    # TABELA EDYCJI
-    df = pobierz_dane()
-    
-    if not df.empty:
-        # --- SEKCJA USUWANIA (Z LOGIKĄ UNIKALNOŚCI) ---
-        with st.expander("🗑️ Usuń błędny wpis"):
-            st.warning("Wybierz wpis z listy (Lp. to numer w tabeli poniżej).")
-            
-            # Tworzymy słownik: "Napis w liście" -> "Prawdziwy indeks wiersza"
-            # Dzięki temu nawet identyczne wpisy będą miały inny numer Lp.
-            mapa_wpisow = {}
-            for idx, row in df.iterrows():
-                # Tworzymy unikalną etykietę: Lp. 1 | Data | Godzina...
-                etykieta = f"Lp. {idx + 1} | {row['Data']} | {row['Godzina']} | {row['Utarg']:.2f} zł"
-                mapa_wpisow[etykieta] = idx
-            
-            # Wyświetlamy listę etykiet
-            wybrana_etykieta = st.selectbox("Wybierz wpis:", list(mapa_wpisow.keys()))
-            
-            if st.button("❌ USUŃ TRWALE", type="primary"):
-                # Odzyskujemy prawdziwy indeks na podstawie wybranej etykiety
-                indeks_do_usuniecia = mapa_wpisow[wybrana_etykieta]
+    # --- LEWA KOLUMNA: FORMULARZ ---
+    with col_left:
+        st.markdown("##### ➕ Nowy wpis")
+        # Dodajemy ramkę (container) żeby formularz się wyróżniał
+        with st.container(border=True):
+            with st.form("dodaj_wpis_main"):
+                wybrana_data = st.date_input("Data", date.today())
                 
-                # Usuwamy wiersz o tym konkretnym indeksie
-                df_po_usunieciu = df.drop(indeks_do_usuniecia)
+                godziny_lista = [f"{h}:00" for h in range(7, 22)]
+                wybor_godziny = st.selectbox("Godzina", godziny_lista)
                 
-                with st.spinner("Usuwam..."):
-                    zapisz_wszystko(df_po_usunieciu)
-                st.success("Usunięto!")
+                klienci = st.number_input("Liczba klientów", min_value=0, step=1)
+                utarg = st.number_input("Utarg (zł)", min_value=0.0, step=0.1)
+                
+                st.markdown("---")
+                # Przycisk
+                submit = st.form_submit_button("ZAPISZ WPIS", type="primary", use_container_width=True)
+
+        if submit:
+            srednia = round(utarg / klienci, 2) if klienci > 0 else 0
+            nowy_wiersz = [str(wybrana_data), wybor_godziny, klienci, utarg, srednia]
+            try:
+                arkusz.append_row(nowy_wiersz)
+                st.toast(f"✅ Dodano! {utarg} zł", icon="💰")
                 st.rerun()
-        # -----------------------------------------------
+            except Exception as e:
+                st.error(f"Błąd zapisu: {e}")
 
-        st.markdown("##### 🖊️ Edytuj wpisy (Kliknij w tabelę)")
+    # --- PRAWA KOLUMNA: LISTA I EDYCJA ---
+    with col_right:
+        df = pobierz_dane()
         
-        konfiguracja = {
-            "Godzina": st.column_config.SelectboxColumn("Godzina", options=[f"{h}:00" for h in range(7, 22)], required=True),
-            "Utarg": st.column_config.NumberColumn("Utarg", min_value=0, format="%.2f zł"),
-            "Srednia": st.column_config.NumberColumn("Średnia", format="%.2f zł", disabled=True),
-            "Klienci": st.column_config.NumberColumn("Klienci", format="%d"),
-            "Data": st.column_config.DateColumn("Data", format="YYYY-MM-DD")
-        }
+        if not df.empty:
+            # 1. Narzędzie usuwania (zwijane, żeby nie zajmowało miejsca)
+            with st.expander("🗑️ Narzędzie usuwania (Kliknij aby rozwinąć)"):
+                mapa_wpisow = {}
+                for idx, row in df.iterrows():
+                    # Unikalna etykieta z numerem Lp.
+                    etykieta = f"Lp. {idx + 1} | {row['Data']} | {row['Godzina']} | {row['Utarg']:.2f} zł"
+                    mapa_wpisow[etykieta] = idx
+                
+                wybrana_etykieta = st.selectbox("Wybierz wpis do usunięcia:", list(mapa_wpisow.keys()))
+                
+                if st.button("❌ USUŃ TRWALE", type="primary"):
+                    indeks_do_usuniecia = mapa_wpisow[wybrana_etykieta]
+                    df_po_usunieciu = df.drop(indeks_do_usuniecia)
+                    with st.spinner("Usuwam..."):
+                        zapisz_wszystko(df_po_usunieciu)
+                    st.success("Usunięto!")
+                    st.rerun()
 
-        edytowane = st.data_editor(df, column_config=konfiguracja, num_rows="dynamic", use_container_width=True, key="editor")
-        
-        if st.button("💾 ZATWIERDŹ ZMIANY I PRZELICZ"):
-            with st.spinner("Aktualizuję..."):
-                zapisz_wszystko(edytowane)
-            st.success("Gotowe!")
-            st.rerun()
+            # 2. Tabela Edycji
+            st.markdown("##### 🖊️ Lista wpisów (Edycja)")
+            
+            konfiguracja = {
+                "Godzina": st.column_config.SelectboxColumn("Godzina", options=[f"{h}:00" for h in range(7, 22)], required=True),
+                "Utarg": st.column_config.NumberColumn("Utarg", min_value=0, format="%.2f zł"),
+                "Srednia": st.column_config.NumberColumn("Średnia", format="%.2f zł", disabled=True),
+                "Klienci": st.column_config.NumberColumn("Klienci", format="%d"),
+                "Data": st.column_config.DateColumn("Data", format="YYYY-MM-DD")
+            }
+
+            edytowane = st.data_editor(
+                df, 
+                column_config=konfiguracja, 
+                num_rows="dynamic", 
+                use_container_width=True, 
+                key="editor",
+                height=500 # Stała wysokość tabeli dla wygody
+            )
+            
+            if st.button("💾 ZATWIERDŹ ZMIANY W TABELI", use_container_width=True):
+                with st.spinner("Aktualizuję..."):
+                    zapisz_wszystko(edytowane)
+                st.success("Zapisano!")
+                st.rerun()
+        else:
+            st.info("Brak wpisów w bazie. Dodaj pierwszy wpis po lewej stronie!")
 
 # === ZAKŁADKA 2: HISTORIA ===
 with tab2:
-    st.subheader("📅 Podsumowanie")
+    st.subheader("📅 Podsumowanie Statystyk")
     df = pobierz_dane()
     
     if not df.empty:
-        # Kafelki
         c1, c2, c3 = st.columns(3)
         suma_utarg = df['Utarg'].sum()
         suma_klientow = df['Klienci'].sum()
         srednia_ogolna = suma_utarg / suma_klientow if suma_klientow > 0 else 0
         
-        c1.metric("Utarg Razem", f"{suma_utarg:.2f} zł")
-        c2.metric("Klienci Razem", f"{suma_klientow}")
-        c3.metric("Śr. Paragon", f"{srednia_ogolna:.2f} zł")
+        c1.metric("Utarg Całkowity", f"{suma_utarg:.2f} zł")
+        c2.metric("Liczba Klientów", f"{suma_klientow}")
+        c3.metric("Średni Paragon", f"{srednia_ogolna:.2f} zł")
 
         st.divider()
         
-        # 1. Tabela zbiorcza (Dni)
-        st.markdown("**Podsumowanie dzienne (Suma):**")
+        # Tabela zbiorcza
+        st.markdown("**Podsumowanie dzienne:**")
         kalendarz = df.groupby('Data')[['Utarg', 'Klienci']].sum().sort_index(ascending=False).reset_index()
         kalendarz['Srednia Dnia'] = kalendarz.apply(lambda x: x['Utarg'] / x['Klienci'] if x['Klienci'] > 0 else 0, axis=1)
 
@@ -190,21 +198,6 @@ with tab2:
             use_container_width=True
         )
         
-        # Wykres
         st.bar_chart(kalendarz, x="Data", y="Utarg")
-
-        st.divider()
-
-        # 2. Pełna lista wpisów (żeby widzieć duplikaty)
-        st.markdown("**Pełna lista transakcji (wszystkie wpisy):**")
-        st.dataframe(
-            df,
-            column_config={
-                "Utarg": st.column_config.NumberColumn(format="%.2f zł"),
-                "Srednia": st.column_config.NumberColumn(format="%.2f zł"),
-            },
-            use_container_width=True
-        )
-
     else:
         st.info("Brak danych.")
