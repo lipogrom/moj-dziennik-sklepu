@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import gspread
-import altair as alt  # <--- NOWA BIBLIOTEKA DO ŁADNYCH WYKRESÓW
+import altair as alt
 from google.oauth2.service_account import Credentials
 from datetime import date, timedelta
 
@@ -44,10 +44,8 @@ def pobierz_dane():
         
         if 'Data' in df.columns:
             df['Data'] = pd.to_datetime(df['Data']).dt.date
-            # Sortowanie: Data malejąco, potem Godzina malejąco
             df = df.sort_values(by=['Data', 'Godzina'], ascending=[False, False])
             
-        # Reset indeksu
         df = df.reset_index(drop=True)
         return df
     except Exception as e:
@@ -57,17 +55,14 @@ def zapisz_wszystko(df):
     """Naprawa matematyki i zapis"""
     df_save = df.copy()
 
-    # --- BEZPIECZNIK ---
     if 'Lp.' in df_save.columns:
         df_save = df_save.drop(columns=['Lp.'])
     
-    # Przeliczanie średniej
     df_save['Srednia'] = df_save.apply(
         lambda row: round(float(row['Utarg']) / float(row['Klienci']), 2) if row['Klienci'] > 0 else 0.0, 
         axis=1
     )
 
-    # Sanityzacja
     df_save['Klienci'] = pd.to_numeric(df_save['Klienci'], errors='coerce').fillna(0).astype(int)
     df_save['Utarg'] = pd.to_numeric(df_save['Utarg'], errors='coerce').fillna(0.0)
     df_save['Srednia'] = pd.to_numeric(df_save['Srednia'], errors='coerce').fillna(0.0)
@@ -89,19 +84,15 @@ tab1, tab2 = st.tabs(["🏠 Panel Główny", "📅 Historia i Wykresy"])
 with tab1:
     col_left, col_right = st.columns([0.35, 0.65], gap="large")
 
-    # --- LEWA: FORMULARZ ---
     with col_left:
         st.markdown("##### ➕ Nowy wpis")
         with st.container(border=True):
             with st.form("dodaj_wpis_main"):
                 wybrana_data = st.date_input("Data", date.today())
-                
                 godziny_lista = [f"{h}:00" for h in range(7, 22)]
                 wybor_godziny = st.selectbox("Godzina", godziny_lista)
-                
                 klienci = st.number_input("Liczba klientów", min_value=0, step=1)
                 utarg = st.number_input("Utarg (zł)", min_value=0.0, step=0.1)
-                
                 st.markdown("---")
                 submit = st.form_submit_button("ZAPISZ WPIS", type="primary", use_container_width=True)
 
@@ -115,7 +106,6 @@ with tab1:
             except Exception as e:
                 st.error(f"Błąd zapisu: {e}")
 
-    # --- PRAWA: TABELA Z Lp. ---
     with col_right:
         df = pobierz_dane()
         
@@ -187,14 +177,15 @@ with tab2:
         widok_wykresu = st.radio("Grupowanie wykresu:", ["📆 Dni", "📊 Tygodnie"], horizontal=True)
 
         if widok_wykresu == "📆 Dni":
-            # --- WYKRES DZIENNY (ALTAIR - POZIOME NAPISY) ---
+            # Wykres Dzienny
             kalendarz = df.groupby('Data')[['Utarg']].sum().reset_index()
             kalendarz['Data'] = pd.to_datetime(kalendarz['Data'])
             kalendarz = kalendarz.sort_values('Data')
             kalendarz['Data'] = kalendarz['Data'].dt.strftime('%Y-%m-%d')
             
             wykres_dni = alt.Chart(kalendarz).mark_bar().encode(
-                x=alt.X('Data', title='Data', axis=alt.Axis(labelAngle=0)), # <-- KĄT 0 STOPNI (POZIOMO)
+                # labelLimit=200 pozwala wyświetlić długie napisy bez ucinania
+                x=alt.X('Data', title='Data', axis=alt.Axis(labelAngle=0, labelLimit=200)), 
                 y=alt.Y('Utarg', title='Utarg (zł)'),
                 tooltip=['Data', 'Utarg']
             ).interactive()
@@ -202,7 +193,7 @@ with tab2:
             st.altair_chart(wykres_dni, use_container_width=True)
             
         else:
-            # --- WYKRES TYGODNIOWY (ALTAIR - POZIOME NAPISY) ---
+            # Wykres Tygodniowy
             df_tyg = df.copy()
             df_tyg['Data'] = pd.to_datetime(df_tyg['Data'])
             
@@ -218,7 +209,8 @@ with tab2:
             wykres_tygodniowy = df_tyg.groupby('Etykieta')[['Utarg']].sum().reset_index().sort_values('Etykieta')
             
             wykres_tyg = alt.Chart(wykres_tygodniowy).mark_bar().encode(
-                x=alt.X('Etykieta', title='Tydzień', axis=alt.Axis(labelAngle=0)), # <-- KĄT 0 STOPNI (POZIOMO)
+                # labelLimit=200 ZWIĘKSZA LIMIT ZNAKÓW I NAPIS NIE BĘDZIE UCIĘTY
+                x=alt.X('Etykieta', title='Tydzień', axis=alt.Axis(labelAngle=0, labelLimit=200)), 
                 y=alt.Y('Utarg', title='Utarg (zł)'),
                 tooltip=['Etykieta', 'Utarg']
             ).interactive()
