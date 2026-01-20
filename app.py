@@ -10,7 +10,7 @@ st.title("☁️ Dziennik Sklepu (Google Sheets)")
 
 # --- 2. POŁĄCZENIE Z GOOGLE ---
 # 👇👇👇 TUTAJ WKLEJ SWOJE ID Z LINKU DO ARKUSZA 👇👇👇
-ARKUSZ_ID = "WKLEJ_TUTAJ_SWOJE_ID_Z_LINKU" 
+ARKUSZ_ID = "13M376ahDkq_8ZdwxDZ5Njn4cTKfO4v78ycMRsowmPMs" 
 
 @st.cache_resource
 def polacz_z_google():
