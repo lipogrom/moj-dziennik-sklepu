@@ -83,4 +83,50 @@ with tab1:
             st.rerun()
             
         # Przycisk pobierania (Backup)
-        csv = edytowane_dane.
+        csv = edytowane_dane.to_csv(index=False).encode('utf-8')
+        st.download_button("Pobierz backup (CSV)", csv, "sklep_backup.csv", "text/csv")
+
+# ==========================================
+# ZAKŁADKA 2: KALENDARZ I HISTORIA
+# ==========================================
+with tab2:
+    st.header("📅 Twój Kalendarz Sprzedaży")
+    
+    df = laduj_dane()
+    
+    if not df.empty:
+        # Grupujemy dane po DATACH, żeby zrobić widok kalendarza
+        kalendarz = df.groupby('Data')[['Utarg', 'Klienci']].sum().sort_index(ascending=False).reset_index()
+        
+        # Wyświetlamy jako ładne kafelki (Metrics) dla ostatnich 3 dni
+        st.subheader("Ostatnie dni w skrócie:")
+        cols = st.columns(3)
+        for i, row in enumerate(kalendarz.head(3).itertuples()):
+            with cols[i]:
+                st.metric(
+                    label=str(row.Data), 
+                    value=f"{row.Utarg:.2f} zł", 
+                    delta=f"{row.Klienci} klientów"
+                )
+        
+        st.divider()
+        
+        # Tabela zbiorcza (Kalendarz)
+        st.subheader("Pełna historia dni")
+        # Formatujemy tabelę, żeby wyglądała czytelniej
+        st.dataframe(
+            kalendarz,
+            column_config={
+                "Data": st.column_config.DateColumn("Dzień"),
+                "Utarg": st.column_config.NumberColumn("Utarg (zł)", format="%.2f zł"),
+                "Klienci": st.column_config.NumberColumn("Liczba Klientów"),
+            },
+            use_container_width=True
+        )
+        
+        # Wykres miesięczny
+        st.subheader("📈 Trend sprzedaży (wg dni)")
+        st.bar_chart(data=kalendarz, x='Data', y='Utarg')
+        
+    else:
+        st.info("Brak danych w historii.")
