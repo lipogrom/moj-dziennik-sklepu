@@ -57,8 +57,7 @@ def zapisz_wszystko(df):
     df_save = df.copy()
 
     # --- BEZPIECZNIK ---
-    # Jeśli w tabeli jest kolumna 'Lp.', usuwamy ją przed zapisem do Google
-    # (Nie chcemy jej w bazie, bo ona jest tylko do podglądu)
+    # Usuwamy kolumnę Lp. (jeśli istnieje) przed wysłaniem do Google
     if 'Lp.' in df_save.columns:
         df_save = df_save.drop(columns=['Lp.'])
     
@@ -121,17 +120,13 @@ with tab1:
         df = pobierz_dane()
         
         if not df.empty:
-            # --- DODANIE KOLUMNY Lp. ---
-            # Dodajemy kolumnę Lp. na samym początku (index 0)
-            # range(1, len+1) tworzy liczby od 1 do końca listy
+            # Dodanie kolumny Lp.
             df.insert(0, 'Lp.', range(1, len(df) + 1))
-            # ---------------------------
 
             # Usuwanie
             with st.expander("🗑️ Narzędzie usuwania"):
                 mapa_wpisow = {}
                 for idx, row in df.iterrows():
-                    # Tutaj używamy Lp. z wiersza
                     etykieta = f"Lp. {row['Lp.']} | {row['Data']} | {row['Godzina']} | {row['Utarg']:.2f} zł"
                     mapa_wpisow[etykieta] = idx
                 
@@ -149,7 +144,7 @@ with tab1:
             st.markdown("##### 🖊️ Ostatnie wpisy (Zgodność numeracji Lp.)")
             
             konfiguracja = {
-                "Lp.": st.column_config.NumberColumn("Lp.", disabled=True, width="small"), # Zablokowana edycja Lp.
+                "Lp.": st.column_config.NumberColumn("Lp.", disabled=True, width="small"),
                 "Godzina": st.column_config.SelectboxColumn("Godzina", options=[f"{h}:00" for h in range(7, 22)], required=True),
                 "Utarg": st.column_config.NumberColumn("Utarg", min_value=0, format="%.2f zł"),
                 "Srednia": st.column_config.NumberColumn("Średnia", format="%.2f zł", disabled=True),
@@ -164,7 +159,7 @@ with tab1:
                 use_container_width=True, 
                 key="editor",
                 height=500,
-                hide_index=True # Ukrywamy domyślny indeks (ten z lewej), bo mamy własne Lp.
+                hide_index=True
             )
             
             if st.button("💾 ZATWIERDŹ ZMIANY W TABELI", use_container_width=True):
@@ -192,21 +187,47 @@ with tab2:
 
         st.divider()
         
-        # Wykres i Tabela dzienna
-        kalendarz = df.groupby('Data')[['Utarg', 'Klienci']].sum().sort_index(ascending=False).reset_index()
-        kalendarz['Srednia Dnia'] = kalendarz.apply(lambda x: x['Utarg'] / x['Klienci'] if x['Klienci'] > 0 else 0, axis=1)
+        # --- SEKCJA WYKRESU (Z PODZIAŁEM NA TYGODNIE) ---
         
-        # Formatowanie wykresu
-        kalendarz_wykres = kalendarz.copy()
-        kalendarz_wykres['Data'] = kalendarz_wykres['Data'].astype(str)
-        kalendarz_wykres = kalendarz_wykres.sort_values(by='Data')
+        # Przełącznik widoku
+        widok_wykresu = st.radio("Grupowanie wykresu:", ["📆 Dni", "📊 Tygodnie"], horizontal=True)
 
-        st.markdown("**Wykres dzienny:**")
-        st.bar_chart(kalendarz_wykres, x="Data", y="Utarg")
+        if widok_wykresu == "📆 Dni":
+            # LOGIKA DZIENNA (Stara)
+            kalendarz = df.groupby('Data')[['Utarg']].sum().reset_index()
+            # Sortowanie chronologiczne
+            kalendarz['Data'] = pd.to_datetime(kalendarz['Data'])
+            kalendarz = kalendarz.sort_values('Data')
+            # Na string dla wykresu
+            kalendarz['Data'] = kalendarz['Data'].dt.strftime('%Y-%m-%d')
+            
+            st.bar_chart(kalendarz, x="Data", y="Utarg")
+            
+        else:
+            # LOGIKA TYGODNIOWA (Nowa)
+            df_tyg = df.copy()
+            df_tyg['Data'] = pd.to_datetime(df_tyg['Data'])
+            # Tworzymy kolumnę Rok-Tydzień (np. 2024-W05)
+            df_tyg['Tydzien'] = df_tyg['Data'].dt.strftime('%Y-W%W')
+            
+            # Grupujemy po tygodniach
+            wykres_tygodniowy = df_tyg.groupby('Tydzien')[['Utarg']].sum().reset_index()
+            # Sortujemy
+            wykres_tygodniowy = wykres_tygodniowy.sort_values('Tydzien')
+            
+            st.bar_chart(wykres_tygodniowy, x="Tydzien", y="Utarg")
+        
+        # ----------------------------------------------------
 
-        st.markdown("**Tabela podsumowująca:**")
+        st.divider()
+        st.markdown("**Tabela podsumowująca (Dni):**")
+        
+        # Tabela zbiorcza (zawsze dni, bo to szczegóły)
+        tabela_dni = df.groupby('Data')[['Utarg', 'Klienci']].sum().sort_index(ascending=False).reset_index()
+        tabela_dni['Srednia Dnia'] = tabela_dni.apply(lambda x: x['Utarg'] / x['Klienci'] if x['Klienci'] > 0 else 0, axis=1)
+
         st.dataframe(
-            kalendarz, 
+            tabela_dni, 
             column_config={
                 "Utarg": st.column_config.NumberColumn(format="%.2f zł"),
                 "Srednia Dnia": st.column_config.NumberColumn(format="%.2f zł"),
