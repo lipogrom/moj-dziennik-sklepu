@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import date
+from datetime import date, timedelta
 
 # --- 1. KONFIGURACJA STRONY ---
 st.set_page_config(page_title="Dziennik Sklepu", page_icon="🛒", layout="wide")
@@ -57,7 +57,6 @@ def zapisz_wszystko(df):
     df_save = df.copy()
 
     # --- BEZPIECZNIK ---
-    # Usuwamy kolumnę Lp. (jeśli istnieje) przed wysłaniem do Google
     if 'Lp.' in df_save.columns:
         df_save = df_save.drop(columns=['Lp.'])
     
@@ -141,7 +140,7 @@ with tab1:
                     st.rerun()
 
             # Tabela
-            st.markdown("##### 🖊️ Ostatnie wpisy (Zgodność numeracji Lp.)")
+            st.markdown("##### 🖊️ Ostatnie wpisy")
             
             konfiguracja = {
                 "Lp.": st.column_config.NumberColumn("Lp.", disabled=True, width="small"),
@@ -187,42 +186,53 @@ with tab2:
 
         st.divider()
         
-        # --- SEKCJA WYKRESU (Z PODZIAŁEM NA TYGODNIE) ---
-        
-        # Przełącznik widoku
+        # --- SEKCJA WYKRESU ---
         widok_wykresu = st.radio("Grupowanie wykresu:", ["📆 Dni", "📊 Tygodnie"], horizontal=True)
 
         if widok_wykresu == "📆 Dni":
-            # LOGIKA DZIENNA (Stara)
+            # Wykres Dzienny
             kalendarz = df.groupby('Data')[['Utarg']].sum().reset_index()
-            # Sortowanie chronologiczne
             kalendarz['Data'] = pd.to_datetime(kalendarz['Data'])
             kalendarz = kalendarz.sort_values('Data')
-            # Na string dla wykresu
             kalendarz['Data'] = kalendarz['Data'].dt.strftime('%Y-%m-%d')
             
             st.bar_chart(kalendarz, x="Data", y="Utarg")
             
         else:
-            # LOGIKA TYGODNIOWA (Nowa)
+            # --- NOWY WYKRES TYGODNIOWY Z ZAKRESEM DAT ---
             df_tyg = df.copy()
             df_tyg['Data'] = pd.to_datetime(df_tyg['Data'])
-            # Tworzymy kolumnę Rok-Tydzień (np. 2024-W05)
-            df_tyg['Tydzien'] = df_tyg['Data'].dt.strftime('%Y-W%W')
             
-            # Grupujemy po tygodniach
-            wykres_tygodniowy = df_tyg.groupby('Tydzien')[['Utarg']].sum().reset_index()
-            # Sortujemy
-            wykres_tygodniowy = wykres_tygodniowy.sort_values('Tydzien')
+            # Funkcja pomocnicza do tworzenia ładnej etykiety
+            def oznacz_tydzien(data):
+                # Znajdź poniedziałek (0 = Poniedziałek)
+                start_tygodnia = data - timedelta(days=data.weekday())
+                # Znajdź niedzielę
+                koniec_tygodnia = start_tygodnia + timedelta(days=6)
+                # Numer tygodnia ISO
+                nr_tygodnia = data.strftime('%W')
+                rok = data.strftime('%Y')
+                
+                # Format: "2024-W03 (15.01 - 21.01)"
+                zakres = f"{start_tygodnia.strftime('%d.%m')} - {koniec_tygodnia.strftime('%d.%m')}"
+                return f"{rok}-W{nr_tygodnia} ({zakres})"
+
+            # Aplikujemy funkcję
+            df_tyg['Etykieta'] = df_tyg['Data'].apply(oznacz_tydzien)
             
-            st.bar_chart(wykres_tygodniowy, x="Tydzien", y="Utarg")
+            # Grupujemy po nowej etykiecie
+            wykres_tygodniowy = df_tyg.groupby('Etykieta')[['Utarg']].sum().reset_index()
+            
+            # Sortujemy alfabetycznie (co przy formacie YYYY-W... działa chronologicznie)
+            wykres_tygodniowy = wykres_tygodniowy.sort_values('Etykieta')
+            
+            st.bar_chart(wykres_tygodniowy, x="Etykieta", y="Utarg")
         
         # ----------------------------------------------------
 
         st.divider()
         st.markdown("**Tabela podsumowująca (Dni):**")
         
-        # Tabela zbiorcza (zawsze dni, bo to szczegóły)
         tabela_dni = df.groupby('Data')[['Utarg', 'Klienci']].sum().sort_index(ascending=False).reset_index()
         tabela_dni['Srednia Dnia'] = tabela_dni.apply(lambda x: x['Utarg'] / x['Klienci'] if x['Klienci'] > 0 else 0, axis=1)
 
