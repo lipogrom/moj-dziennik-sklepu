@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import gspread
+import altair as alt  # <--- NOWA BIBLIOTEKA DO ŁADNYCH WYKRESÓW
 from google.oauth2.service_account import Credentials
 from datetime import date, timedelta
 
@@ -119,10 +120,8 @@ with tab1:
         df = pobierz_dane()
         
         if not df.empty:
-            # Dodanie kolumny Lp.
             df.insert(0, 'Lp.', range(1, len(df) + 1))
 
-            # Usuwanie
             with st.expander("🗑️ Narzędzie usuwania"):
                 mapa_wpisow = {}
                 for idx, row in df.iterrows():
@@ -139,7 +138,6 @@ with tab1:
                     st.success("Usunięto!")
                     st.rerun()
 
-            # Tabela
             st.markdown("##### 🖊️ Ostatnie wpisy")
             
             konfiguracja = {
@@ -186,50 +184,47 @@ with tab2:
 
         st.divider()
         
-        # --- SEKCJA WYKRESU ---
         widok_wykresu = st.radio("Grupowanie wykresu:", ["📆 Dni", "📊 Tygodnie"], horizontal=True)
 
         if widok_wykresu == "📆 Dni":
-            # Wykres Dzienny
+            # --- WYKRES DZIENNY (ALTAIR - POZIOME NAPISY) ---
             kalendarz = df.groupby('Data')[['Utarg']].sum().reset_index()
             kalendarz['Data'] = pd.to_datetime(kalendarz['Data'])
             kalendarz = kalendarz.sort_values('Data')
             kalendarz['Data'] = kalendarz['Data'].dt.strftime('%Y-%m-%d')
             
-            st.bar_chart(kalendarz, x="Data", y="Utarg")
+            wykres_dni = alt.Chart(kalendarz).mark_bar().encode(
+                x=alt.X('Data', title='Data', axis=alt.Axis(labelAngle=0)), # <-- KĄT 0 STOPNI (POZIOMO)
+                y=alt.Y('Utarg', title='Utarg (zł)'),
+                tooltip=['Data', 'Utarg']
+            ).interactive()
+            
+            st.altair_chart(wykres_dni, use_container_width=True)
             
         else:
-            # --- NOWY WYKRES TYGODNIOWY Z ZAKRESEM DAT ---
+            # --- WYKRES TYGODNIOWY (ALTAIR - POZIOME NAPISY) ---
             df_tyg = df.copy()
             df_tyg['Data'] = pd.to_datetime(df_tyg['Data'])
             
-            # Funkcja pomocnicza do tworzenia ładnej etykiety
             def oznacz_tydzien(data):
-                # Znajdź poniedziałek (0 = Poniedziałek)
-                start_tygodnia = data - timedelta(days=data.weekday())
-                # Znajdź niedzielę
-                koniec_tygodnia = start_tygodnia + timedelta(days=6)
-                # Numer tygodnia ISO
-                nr_tygodnia = data.strftime('%W')
+                start = data - timedelta(days=data.weekday())
+                koniec = start + timedelta(days=6)
+                nr = data.strftime('%W')
                 rok = data.strftime('%Y')
-                
-                # Format: "2024-W03 (15.01 - 21.01)"
-                zakres = f"{start_tygodnia.strftime('%d.%m')} - {koniec_tygodnia.strftime('%d.%m')}"
-                return f"{rok}-W{nr_tygodnia} ({zakres})"
+                zakres = f"{start.strftime('%d.%m')} - {koniec.strftime('%d.%m')}"
+                return f"{rok}-W{nr} ({zakres})"
 
-            # Aplikujemy funkcję
             df_tyg['Etykieta'] = df_tyg['Data'].apply(oznacz_tydzien)
+            wykres_tygodniowy = df_tyg.groupby('Etykieta')[['Utarg']].sum().reset_index().sort_values('Etykieta')
             
-            # Grupujemy po nowej etykiecie
-            wykres_tygodniowy = df_tyg.groupby('Etykieta')[['Utarg']].sum().reset_index()
-            
-            # Sortujemy alfabetycznie (co przy formacie YYYY-W... działa chronologicznie)
-            wykres_tygodniowy = wykres_tygodniowy.sort_values('Etykieta')
-            
-            st.bar_chart(wykres_tygodniowy, x="Etykieta", y="Utarg")
-        
-        # ----------------------------------------------------
+            wykres_tyg = alt.Chart(wykres_tygodniowy).mark_bar().encode(
+                x=alt.X('Etykieta', title='Tydzień', axis=alt.Axis(labelAngle=0)), # <-- KĄT 0 STOPNI (POZIOMO)
+                y=alt.Y('Utarg', title='Utarg (zł)'),
+                tooltip=['Etykieta', 'Utarg']
+            ).interactive()
 
+            st.altair_chart(wykres_tyg, use_container_width=True)
+        
         st.divider()
         st.markdown("**Tabela podsumowująca (Dni):**")
         
