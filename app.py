@@ -161,4 +161,49 @@ with tab1:
                 st.success("Zapisano!")
                 st.rerun()
         else:
-            st.info("Brak wp
+            st.info("Brak wpisów.")
+
+# === ZAKŁADKA 2: HISTORIA ===
+with tab2:
+    st.subheader("📅 Podsumowanie Statystyk")
+    df = pobierz_dane()
+    
+    if not df.empty:
+        c1, c2, c3 = st.columns(3)
+        suma_utarg = df['Utarg'].sum()
+        suma_klientow = df['Klienci'].sum()
+        srednia_ogolna = suma_utarg / suma_klientow if suma_klientow > 0 else 0
+        
+        c1.metric("Utarg Całkowity", f"{suma_utarg:.2f} zł")
+        c2.metric("Liczba Klientów", f"{suma_klientow}")
+        c3.metric("Średni Paragon", f"{srednia_ogolna:.2f} zł")
+
+        st.divider()
+        
+        # Przygotowanie danych do wykresu (Sumowanie dzienne)
+        kalendarz = df.groupby('Data')[['Utarg', 'Klienci']].sum().sort_index(ascending=False).reset_index()
+        kalendarz['Srednia Dnia'] = kalendarz.apply(lambda x: x['Utarg'] / x['Klienci'] if x['Klienci'] > 0 else 0, axis=1)
+        
+        # --- POPRAWKA WYKRESU (NAPRAWA ROZJEŻDŻANIA) ---
+        # Zamieniamy datę na tekst (String), żeby wykres traktował dni jako 'Kategorie', a nie 'Oś czasu'
+        kalendarz_wykres = kalendarz.copy()
+        kalendarz_wykres['Data'] = kalendarz_wykres['Data'].astype(str)
+        # Sortujemy rosnąco dla wykresu (od lewej do prawej chronologicznie)
+        kalendarz_wykres = kalendarz_wykres.sort_values(by='Data')
+        # -----------------------------------------------
+
+        st.markdown("**Wykres dzienny:**")
+        st.bar_chart(kalendarz_wykres, x="Data", y="Utarg")
+
+        st.markdown("**Tabela podsumowująca:**")
+        st.dataframe(
+            kalendarz, 
+            column_config={
+                "Utarg": st.column_config.NumberColumn(format="%.2f zł"),
+                "Srednia Dnia": st.column_config.NumberColumn(format="%.2f zł"),
+                "Data": st.column_config.DateColumn("Dzień")
+            },
+            use_container_width=True
+        )
+    else:
+        st.info("Brak danych.")
