@@ -8,9 +8,9 @@ from datetime import date
 st.set_page_config(page_title="Dziennik Sklepu Cloud", page_icon="☁️", layout="wide")
 st.title("☁️ Dziennik Sklepu (Google Sheets)")
 
-# --- 2. POŁĄCZENIE Z GOOGLE (METODA PANCERNA - PO ID) ---
-# WKLEJ TUTAJ SWOJE ID ARKUSZA (To z linku w przeglądarce)
-ARKUSZ_ID = "13M376ahDkq_8ZdwxDZ5Njn4cTKfO4v78ycMRsowmPMs" 
+# --- 2. POŁĄCZENIE Z GOOGLE ---
+# Tutaj wklej swoje ID (jeśli się zmieniło, zaktualizuj je!)
+ARKUSZ_ID = "WKLEJ_TUTAJ_SWOJE_ID_Z_LINKU" 
 
 @st.cache_resource
 def polacz_z_google():
@@ -19,25 +19,15 @@ def polacz_z_google():
         scope = ['https://www.googleapis.com/auth/spreadsheets']
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
         client = gspread.authorize(creds)
-        
-        # Otwieramy po ID (open_by_key) - to działa zawsze, niezależnie od folderu
         sheet = client.open_by_key(ARKUSZ_ID).sheet1
         return sheet
     except Exception as e:
         return None
 
-# Próba połączenia
 arkusz = polacz_z_google()
 
 if arkusz is None:
-    st.error(f"❌ BŁĄD: Nie mogę otworzyć arkusza o ID: {ARKUSZ_ID}")
-    st.info("Porady naprawcze:")
-    st.markdown("""
-    1. Sprawdź, czy wkleiłeś **dobre ID** w kodzie (tylko ciąg znaków z linku).
-    2. Upewnij się na 100%, że kliknąłeś w arkuszu **Udostępnij** i wkleiłeś mail robota:
-       `client_email` (znajdziesz go w pliku secrets).
-    3. Robot musi mieć uprawnienia **Edytujący**.
-    """)
+    st.error(f"❌ BŁĄD: Nie mogę otworzyć arkusza. Sprawdź ID w kodzie i uprawnienia robota.")
     st.stop()
 else:
     st.toast("Połączono z Google Sheets!", icon="✅")
@@ -62,17 +52,27 @@ def pobierz_dane():
             df = df.sort_values(by=['Data', 'Godzina'], ascending=[False, True])
         return df
     except Exception as e:
-        # Jeśli arkusz jest pusty lub ma zły format nagłówków
         return pd.DataFrame(columns=['Data', 'Godzina', 'Klienci', 'Utarg', 'Srednia'])
 
 def zapisz_wszystko(df):
-    """Nadpisuje cały arkusz"""
+    """Nadpisuje cały arkusz (Bezpieczna wersja)"""
     df_save = df.copy()
+    
+    # --- NAPRAWA PUSTYCH PÓL ---
+    df_save['Klienci'] = pd.to_numeric(df_save['Klienci'], errors='coerce').fillna(0).astype(int)
+    df_save['Utarg'] = pd.to_numeric(df_save['Utarg'], errors='coerce').fillna(0.0)
+    df_save['Srednia'] = pd.to_numeric(df_save['Srednia'], errors='coerce').fillna(0.0)
+    df_save = df_save.fillna("") # Reszta pustych na tekst
+    # ---------------------------
+
     df_save['Data'] = df_save['Data'].astype(str)
     
-    arkusz.clear()
-    arkusz.append_row(df_save.columns.tolist())
-    arkusz.append_rows(df_save.values.tolist())
+    try:
+        arkusz.clear()
+        arkusz.append_row(df_save.columns.tolist())
+        arkusz.append_rows(df_save.values.tolist())
+    except Exception as e:
+        st.error(f"Błąd zapisu: {e}")
 
 # --- 4. INTERFEJS ---
 tab1, tab2 = st.tabs(["✍️ Wpis i Edycja", "📅 Kalendarz i Historia"])
@@ -81,6 +81,7 @@ tab1, tab2 = st.tabs(["✍️ Wpis i Edycja", "📅 Kalendarz i Historia"])
 with tab1:
     st.header("Zarządzanie wpisami")
     
+    # --- FORMULARZ DODAWANIA ---
     with st.sidebar:
         st.header("➕ Dodaj nowy wpis")
         with st.form("dodaj_wpis"):
@@ -95,7 +96,6 @@ with tab1:
     if submit:
         srednia = round(utarg / klienci, 2) if klienci > 0 else 0
         nowy_wiersz = [str(wybrana_data), wybor_godziny, klienci, utarg, srednia]
-        
         try:
             arkusz.append_row(nowy_wiersz)
             st.success(f"✅ Zapisano! {wybrana_data} - {wybor_godziny}")
@@ -103,30 +103,28 @@ with tab1:
         except Exception as e:
             st.error(f"Błąd zapisu: {e}")
 
-    # EDYCJA
+    # --- EDYCJA I USUWANIE ---
     df = pobierz_dane()
     
     if not df.empty:
-        st.info("💡 Edytuj tabelę i zatwierdź przyciskiem poniżej.")
-        edytowane = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="editor")
-        
-        if st.button("💾 ZATWIERDŹ ZMIANY W GOOGLE SHEETS", type="primary"):
-            with st.spinner("Aktualizuję chmurę..."):
-                zapisz_wszystko(edytowane)
-            st.success("Arkusz zaktualizowany.")
-            st.rerun()
-
-# === ZAKŁADKA 2: KALENDARZ ===
-with tab2:
-    st.header("📅 Podsumowanie")
-    df = pobierz_dane()
-    
-    if not df.empty:
-        kalendarz = df.groupby('Data')[['Utarg', 'Klienci']].sum().sort_index(ascending=False).reset_index()
-        
-        col1, col2 = st.columns(2)
-        col1.metric("Łączny Utarg", f"{df['Utarg'].sum():.2f} zł")
-        col2.metric("Łącznie Klientów", f"{df['Klienci'].sum()}")
-        
-        st.dataframe(kalendarz, use_container_width=True)
-        st.bar_chart(kalendarz, x="Data", y="Utarg")
+        # SEKCJA 1: USUWANIE (NOWOŚĆ DLA MOBILE)
+        with st.expander("🗑️ NARZĘDZIE USUWANIA (Kliknij tutaj)", expanded=False):
+            st.warning("Wybierz wpis z listy, aby go trwale usunąć.")
+            
+            # Tworzymy czytelną listę wpisów do wyboru
+            lista_wpisow = [
+                f"{row['Data']} | Godz: {row['Godzina']} | Utarg: {row['Utarg']} zł | Klientów: {row['Klienci']}" 
+                for index, row in df.iterrows()
+            ]
+            
+            wybrany_do_usuniecia = st.selectbox("Wybierz wpis do skasowania:", lista_wpisow)
+            
+            if st.button("❌ USUŃ WYBRANY WPIS", type="primary"):
+                # Znajdujemy indeks wybranego wpisu na liście
+                indeks = lista_wpisow.index(wybrany_do_usuniecia)
+                # Usuwamy go z danych
+                df_po_usunieciu = df.drop(df.index[indeks])
+                
+                with st.spinner("Usuwam wpis z chmury..."):
+                    zapisz_wszystko(df_po_usunieciu)
+                st.success("
