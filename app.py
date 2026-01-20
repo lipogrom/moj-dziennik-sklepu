@@ -43,10 +43,11 @@ def pobierz_dane():
         
         if 'Data' in df.columns:
             df['Data'] = pd.to_datetime(df['Data']).dt.date
-            # Sortowanie: Data malejąco, potem Godzina rosnąco
-            df = df.sort_values(by=['Data', 'Godzina'], ascending=[False, True])
+            # POPRAWKA SORTOWANIA: Najpierw Data (Malejąco), potem Godzina (Malejąco)
+            # Dzięki temu godzina 20:00 będzie wyżej niż 8:00 tego samego dnia
+            df = df.sort_values(by=['Data', 'Godzina'], ascending=[False, False])
             
-        # Reset indeksu dla porządku (Lp.)
+        # Reset indeksu (Lp.)
         df = df.reset_index(drop=True)
         return df
     except Exception as e:
@@ -56,7 +57,7 @@ def zapisz_wszystko(df):
     """Naprawa matematyki i zapis"""
     df_save = df.copy()
     
-    # Przeliczanie średniej (Dzielenie: Utarg / Klienci)
+    # Przeliczanie średniej
     df_save['Srednia'] = df_save.apply(
         lambda row: round(float(row['Utarg']) / float(row['Klienci']), 2) if row['Klienci'] > 0 else 0.0, 
         axis=1
@@ -78,32 +79,28 @@ def zapisz_wszystko(df):
 
 # --- 4. INTERFEJS ---
 
-# Zakładki główne na samej górze
-tab1, tab2 = st.tabs(["🏠 Panel Główny (Dodaj i Edytuj)", "📅 Historia i Wykresy"])
+tab1, tab2 = st.tabs(["🏠 Panel Główny", "📅 Historia i Wykresy"])
 
 # === ZAKŁADKA 1: PANEL GŁÓWNY (DZIELONY) ===
 with tab1:
     
-    # Dzielimy ekran na dwie kolumny: LEWA (Formularz) i PRAWA (Tabela)
-    # Proporcja [0.35, 0.65] oznacza, że lewa zajmuje 35% ekranu, prawa 65%
     col_left, col_right = st.columns([0.35, 0.65], gap="large")
 
     # --- LEWA KOLUMNA: FORMULARZ ---
     with col_left:
         st.markdown("##### ➕ Nowy wpis")
-        # Dodajemy ramkę (container) żeby formularz się wyróżniał
         with st.container(border=True):
             with st.form("dodaj_wpis_main"):
                 wybrana_data = st.date_input("Data", date.today())
                 
                 godziny_lista = [f"{h}:00" for h in range(7, 22)]
+                # Domyślna godzina ustawiona na aktualną (lub bliską)
                 wybor_godziny = st.selectbox("Godzina", godziny_lista)
                 
                 klienci = st.number_input("Liczba klientów", min_value=0, step=1)
                 utarg = st.number_input("Utarg (zł)", min_value=0.0, step=0.1)
                 
                 st.markdown("---")
-                # Przycisk
                 submit = st.form_submit_button("ZAPISZ WPIS", type="primary", use_container_width=True)
 
         if submit:
@@ -121,11 +118,10 @@ with tab1:
         df = pobierz_dane()
         
         if not df.empty:
-            # 1. Narzędzie usuwania (zwijane, żeby nie zajmowało miejsca)
-            with st.expander("🗑️ Narzędzie usuwania (Kliknij aby rozwinąć)"):
+            # Usuwanie
+            with st.expander("🗑️ Narzędzie usuwania"):
                 mapa_wpisow = {}
                 for idx, row in df.iterrows():
-                    # Unikalna etykieta z numerem Lp.
                     etykieta = f"Lp. {idx + 1} | {row['Data']} | {row['Godzina']} | {row['Utarg']:.2f} zł"
                     mapa_wpisow[etykieta] = idx
                 
@@ -139,8 +135,8 @@ with tab1:
                     st.success("Usunięto!")
                     st.rerun()
 
-            # 2. Tabela Edycji
-            st.markdown("##### 🖊️ Lista wpisów (Edycja)")
+            # Tabela
+            st.markdown("##### 🖊️ Ostatnie wpisy (Od najnowszego)")
             
             konfiguracja = {
                 "Godzina": st.column_config.SelectboxColumn("Godzina", options=[f"{h}:00" for h in range(7, 22)], required=True),
@@ -156,7 +152,7 @@ with tab1:
                 num_rows="dynamic", 
                 use_container_width=True, 
                 key="editor",
-                height=500 # Stała wysokość tabeli dla wygody
+                height=500
             )
             
             if st.button("💾 ZATWIERDŹ ZMIANY W TABELI", use_container_width=True):
@@ -165,39 +161,4 @@ with tab1:
                 st.success("Zapisano!")
                 st.rerun()
         else:
-            st.info("Brak wpisów w bazie. Dodaj pierwszy wpis po lewej stronie!")
-
-# === ZAKŁADKA 2: HISTORIA ===
-with tab2:
-    st.subheader("📅 Podsumowanie Statystyk")
-    df = pobierz_dane()
-    
-    if not df.empty:
-        c1, c2, c3 = st.columns(3)
-        suma_utarg = df['Utarg'].sum()
-        suma_klientow = df['Klienci'].sum()
-        srednia_ogolna = suma_utarg / suma_klientow if suma_klientow > 0 else 0
-        
-        c1.metric("Utarg Całkowity", f"{suma_utarg:.2f} zł")
-        c2.metric("Liczba Klientów", f"{suma_klientow}")
-        c3.metric("Średni Paragon", f"{srednia_ogolna:.2f} zł")
-
-        st.divider()
-        
-        # Tabela zbiorcza
-        st.markdown("**Podsumowanie dzienne:**")
-        kalendarz = df.groupby('Data')[['Utarg', 'Klienci']].sum().sort_index(ascending=False).reset_index()
-        kalendarz['Srednia Dnia'] = kalendarz.apply(lambda x: x['Utarg'] / x['Klienci'] if x['Klienci'] > 0 else 0, axis=1)
-
-        st.dataframe(
-            kalendarz, 
-            column_config={
-                "Utarg": st.column_config.NumberColumn(format="%.2f zł"),
-                "Srednia Dnia": st.column_config.NumberColumn(format="%.2f zł"),
-            },
-            use_container_width=True
-        )
-        
-        st.bar_chart(kalendarz, x="Data", y="Utarg")
-    else:
-        st.info("Brak danych.")
+            st.info("Brak wp
