@@ -9,8 +9,8 @@ st.set_page_config(page_title="Dziennik Sklepu Cloud", page_icon="☁️", layou
 st.title("☁️ Dziennik Sklepu (Google Sheets)")
 
 # --- 2. POŁĄCZENIE Z GOOGLE ---
-# 👇👇👇 TUTAJ WKLEJ SWOJE ID Z LINKU DO ARKUSZA 👇👇👇
-ARKUSZ_ID = "13M376ahDkq_8ZdwxDZ5Njn4cTKfO4v78ycMRsowmPMs" 
+# 👇👇👇 ID ARKUSZA (Poprawione - bez spacji na końcu) 👇👇👇
+ARKUSZ_ID = "13M376ahDkq_8ZdwxDZ5Njn4cTKfO4v78ycMRsowmPMs"
 
 @st.cache_resource
 def polacz_z_google():
@@ -19,15 +19,24 @@ def polacz_z_google():
         scope = ['https://www.googleapis.com/auth/spreadsheets']
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
         client = gspread.authorize(creds)
+        # Otwieramy po ID
         sheet = client.open_by_key(ARKUSZ_ID).sheet1
         return sheet
     except Exception as e:
+        # Wypisujemy błąd w logach (dla Ciebie), żebyś widział co jest nie tak
+        print(f"Błąd połączenia: {e}")
         return None
 
 arkusz = polacz_z_google()
 
 if arkusz is None:
-    st.error(f"❌ BŁĄD: Nie mogę otworzyć arkusza. Sprawdź czy wkleiłeś dobre ID w kodzie (linia 13).")
+    st.error(f"❌ BŁĄD: Nie mogę otworzyć arkusza o ID: {ARKUSZ_ID}")
+    st.info("💡 Rozwiązanie:")
+    st.markdown("""
+    1. Sprawdź, czy na pewno kliknąłeś **Udostępnij** w tym nowym arkuszu.
+    2. Sprawdź, czy wkleiłeś tam e-mail robota:
+       (Znajdziesz go w Streamlit -> Settings -> Secrets -> client_email).
+    """)
     st.stop()
 else:
     st.toast("Połączono z Google Sheets!", icon="✅")
@@ -121,14 +130,12 @@ with tab1:
             wybrany_do_usuniecia = st.selectbox("Wybierz wpis do skasowania:", lista_wpisow)
             
             if st.button("❌ USUŃ WYBRANY WPIS", type="primary"):
-                # Znajdujemy indeks i usuwamy
                 indeks = lista_wpisow.index(wybrany_do_usuniecia)
                 df_po_usunieciu = df.drop(df.index[indeks])
                 
                 with st.spinner("Usuwam wpis z chmury..."):
                     zapisz_wszystko(df_po_usunieciu)
                 
-                # TU BYŁ WCZEŚNIEJ BŁĄD - TERAZ JEST POPRAWIONE:
                 st.success("Wpis usunięty!")
                 st.rerun()
 
